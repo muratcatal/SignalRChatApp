@@ -1,0 +1,54 @@
+﻿#loginPanel {
+    margin-top: 300px;
+}
+
+#chatPanel {
+    margin-top: 100px;
+    border: 10px solid white;
+    padding: 10px;
+}
+
+#messages {
+    height: 500px;
+    overflow-y: auto;
+    background-color: aqua;
+    margin-bottom: 1px;
+    padding: 5px 20px 5px 20px;
+}
+
+#userList {
+    height: 500px;
+    overflow-x: auto;
+    margin-top: 2px;
+}
+
+.user {
+    padding: 10px;
+    border-bottom: 1px solid bisque;
+    cursor: pointer
+}
+
+    .user:hover {
+        background-color: cadetblue;
+        color: white;
+    }
+
+#chatInformation {
+    text-align: right;
+    background-color: darkseagreen;
+    padding: 10px;
+    color: white;
+}
+
+.chat_information {
+    font-style: italic;
+}
+
+.chat_item {
+    padding: 5px;
+}
+
+.me {
+    font-weight: bold;
+    font-style: italic;
+}

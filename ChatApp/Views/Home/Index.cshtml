@@ -1,0 +1,315 @@
+﻿@model dynamic
+
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>title</title>
+    <link href="~/Content/bootstrap.min.css" rel="stylesheet" />
+    <link href="~/Content/chatApp.css" rel="stylesheet" />
+
+    <script src="~/Scripts/jquery-3.1.1.min.js"></script>
+    <script src="~/Scripts/bootstrap.min.js"></script>
+    <script src="~/Scripts/chatApp.js"></script>
+    <script src="~/Scripts/jquery.signalR-2.2.2.min.js"></script>
+
+    <link href="~/bower_components/jquery-toast-plugin/dist/jquery.toast.min.css" rel="stylesheet" />
+    <script src="~/bower_components/jquery-toast-plugin/dist/jquery.toast.min.js"></script>
+    <script src="http://localhost:5561/signalr/hubs"></script>
+
+    <script type="text/javascript">
+        $(function () {
+            $("#loginPanel").toggle(true);
+            $("#chatPanel").toggle(false);
+
+            try {
+                var chat = $.connection.chat;
+                $.connection.hub.url = "http://localhost:5561/signalr"; // define signalR cross origin domain
+
+
+
+                var hub = $.connection.hub;
+                hub.error(function (error) {
+                    // callback state invoked any time an error occurs while SignalR
+                    // is in valid state, or any error causing SignalR to retry connection
+                    // this callback traps both connection startup exceptions and method invocation exceptions
+                    // this callback receives all error messages immediantly when signalR retry connection
+                    console.log(error); // when socket is closed this error is fired
+                    setLoginEnable(false);
+                    showAlert("Warning", "Connection to SignalR hub is lost!");
+                });
+
+                //signalr connection lifetime events
+                hub.starting(function () {
+                    showAlert("Information", "Connection is starting");
+                });
+
+                hub.received(function (data) {
+                    showAlert("Information", "I received a data. Check your console");
+                    console.log("I received", data);
+                });
+
+                hub.connectionSlow(function () {
+                    showAlert("Information", "Do you have a connection problem? It seems so slow");
+                });
+
+                hub.reconnecting(function () {
+                    showAlert("Information", "You are trying to reconnect");
+                });
+
+                hub.reconnected(function () {
+                    showAlert("Information", "Welcome back! You are reconnected!");
+                });
+
+                hub.disconnected(function () {
+                    showAlert("Information", "Opps! You are disconnected!");
+                });
+
+                hub.stateChanged(function (state) {
+                    if (state.oldState !== $.signalR.connectionState.disconnected &&
+                        state.newState === $.signalR.connectionState.connected)
+                        changeState(true);
+                    else if (state.oldState != $.signalR.connectionState.disconnected &&
+                        state.newState === $.signalR.connectionState.disconnected)
+                        changeState(false);
+                    else if (state.newState === $.signalR.connectionState.reconnecting)
+                        showAlert("Information", "SignalR tring to reconnect");
+                    else if (state.oldState === $.signalR.connectionState.reconnecting &&
+                        state.newState === $.signalR.connectionState.disconnected)
+                        showAlert("Information", "SignalR tried to reconnect but could not achieve reconnection");
+                });
+
+
+                // client callback should be defined outside of hub done function
+                // callback of successful login
+                chat.client.loginSuccess = function (channels) {
+                    buildChannels(channels);
+                }
+
+                // callback of creating a channel
+                chat.client.channels = function (channels) {
+                    buildChannels(channels);
+                };
+
+                // callback of joining a channel
+                chat.client.users = function (users, lastUser) {
+                    refreshUsers(users, $("#name").val().trim());
+                    addChatInformation(lastUser + " joined channel");
+                };
+
+                // callback of conversation
+                chat.client.conversation = function (conversation) {
+                    if (conversation.channel === $("#chatInformation").data("joined-channel"))
+                        addChatItem(conversation.name + " says: " + conversation.message);
+                }
+
+                // callback of baning a user
+                chat.client.userBanned = function (result) {
+                    var me = $(".me").text();
+                    if (me !== result.BannedUser) {
+                        addChatInformation(result.BannedUser + " is banned from channel");
+                        refreshUsers(result.Users, me);
+                    }
+                    else {
+                        alert("You are banned from channel");
+                        $("#message").attr("disabled", "disabled");
+                        $("#send").attr("disabled", "disabled");
+                        refreshUsers([], '');
+                    }
+                }
+
+                // callback when a user is banned from server to inform others in server
+                chat.client.userBannedFromServer = function (name) {
+                    addChatInformation(name + " is banned from server");
+                    $("#" + name).remove();
+                }
+
+                // callback when a user is banned from server to disconnect him/her from hub
+                chat.client.bannedFromServer = function () {
+                    hub.stop();
+                    showAlert("Warning", "You are banned from server");
+                    switchPanel(true);
+                }
+
+                chat.client.userDisconnected = function (name) {
+                    addChatInformation(name + " disconnected");
+                    $("#" + name).remove();
+                }
+
+                hub.start({
+                    transport: [
+                        'webSockets',
+                        'longPolling',
+                        'serverSentEvents',
+                        'foreverFrame'
+                    ]
+                })
+                    .done(function () {
+                        console.log("You are connected with " + hub.transport.name);
+
+                        setLoginEnable(true);
+
+                        // login process
+                        $("#login").click(function () {
+                            try {
+                                chat.server.login($("#name").val().trim())
+                                    .done(function () {
+                                        switchPanel(false);
+                                    }).fail(function (error) {
+                                        // callback for async fails on signalR
+                                        if (error.message === "USED_NAME")
+                                            showAlert("Warning",
+                                                "This name is already taken! Please choose another name");
+                                    });
+                            } catch (exception) {
+                                // exceptions of sync errors
+                                console.log(exception);
+                            }
+                        });
+
+                        // creating new channel
+                        $("body").on('click', '#newChannel', function () {
+                            var channel = prompt("Enter your channel");
+                            channel = channel.trim();
+                            var name = $("#name").val().trim();
+                            try {
+                                chat.server.createChannel(channel)
+                                    .done(function () {
+                                        joinChannel(channel, name);
+                                    }).fail(function (error) {
+                                        showAlert("Warning", "Error occurred during channel creation");
+                                    });
+                            } catch (exception) {
+                                /// exceptions of sync errors
+                                console.log(exception);
+                            }
+                        });
+
+                        // joining a channel
+                        $("body").on('click', '.channel_item', function () {
+                            var channel = $(this).data("channel");
+                            var name = $("#name").val().trim();
+                            try {
+                                joinChannel(channel, name);
+                            } catch (exception) {
+                                /// exceptions of sync errors
+                                console.log(exception);
+                            }
+                        });
+
+                        // send chat
+                        $("#send").click(function () {
+                            var channel = $("#chatInformation").data("joined-channel");
+                            var name = $("#name").val().trim();
+                            var message = $("#message").val().trim();
+
+                            var conversation = {
+                                channel: channel,
+                                name: name,
+                                message: message
+                            }
+                            chat.server.say(conversation)
+                                .done(function (message) {
+                                    // show in different format
+                                    addChatItem("Me:" + message);
+                                    $("#message").val("");
+                                }).fail(function (error) {
+                                    if (error.message === "BANNED_WORD") {
+                                        addChatInformation("You used a banned word!");
+                                        $("#message").val("");
+                                    }
+                                });
+                        });
+
+                    }).fail(function (error) {
+                        setLoginEnable(false);
+                        console.log(error);
+                    });
+
+                function joinChannel(channel, name) {
+                    chat.server.join(channel, name)
+                        .done(function (users) {
+                            // give information to current user
+                            $("#chatInformation").text("You are talking at #" + channel + " channel");
+                            $("#chatInformation").removeAttr("data-joined-channel");
+                            $("#chatInformation").attr("data-joined-channel", channel);
+                            $("#message").removeAttr("disabled");
+                            $("#send").removeAttr("disabled");
+                            $("#messages").html("");
+
+                            refreshUsers(users, name);
+                        }).fail(function (error) {
+                            console.log(error);
+                        });
+                }
+            } catch (exception) {
+                showAlert("Warning", "Server may not be started or connection to hub url is denied.");
+            }
+
+        });
+    </script>
+</head>
+<body>
+    <div id="loginPanel">
+        <div class="row">
+            <div class="col-lg-offset-3 col-lg-6">
+                <div class="input-group">
+                    <input type="text" class="form-control" placeholder="Write your name" id="name">
+                    <span class="input-group-btn">
+                        <button class="btn btn-info" type="button" id="login" disabled="disabled">Join!</button>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="chatPanel">
+        <div class="row">
+            <div class="col-lg-offset-3 col-lg-1">
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div class="dropdown" style="width: 100%">
+                            <button class="btn btn-default dropdown-toggle" type="button" id="channelDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                                Channels
+                                <span class="caret"></span>
+                            </button>
+                            <ul class="dropdown-menu" aria-labelledby="channelDropdown" id="channels"></ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div id="userList">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div id="chatInformation">Join a channel or create a new one</div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div id="messages"></div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div class="input-group">
+                            <input type="text" id="message" class="form-control" placeholder="Type your message">
+                            <span class="input-group-btn">
+                                <button class="btn btn-info" type="button" id="send">Send!</button>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
